@@ -28,7 +28,7 @@ function[] = addleg_plot(x,y,style,mark,addleg)
 % Perfume_1
 % Perfume_2
 % Perfume_3
-
+disp('"addleg_plot" is an outdated function, consider using "plott" instead.')
 
 %colors = {'#0072BD','#D95319','#EDB120','#7E2F8E','#77AC30','#4DBEEE','#A2142F'};
 colors = {[0 0.4470 0.7410],[0.8500 0.3250 0.0980],[0.9290 0.6940 0.1250],[0.4940 0.1840 0.5560], ...
