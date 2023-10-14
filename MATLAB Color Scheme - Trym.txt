@@ -1,0 +1,18 @@
+Colors in RBG.
+
+Background:  ( 80,  80,  80)  (dark gray)
+Text:        (190, 190, 190)  (light gray)
+
+Keywords:    (  0, 190, 190)  (grayish cyan)
+Strings:     (200, 150, 250)  (light purple)
+Comments:    (118, 171, 48)   (grass green)
+Unterminated-
+-stings:     (181,  47,  42)  (deep red)
+System-
+-Commands:   (165, 127,  28)  (brown)
+Syntax Error:(197,  77, 120)  (violet)
+Validation:  (199, 101,  55)  (orange-brown)
+
+Error Text:  (213,  87,  87)  (Grayish light red)
+Warning Text:(215, 124,  18)  (grayish orange)
+Hyperlinks:  ( 68, 134, 217)  (grayish blue)
