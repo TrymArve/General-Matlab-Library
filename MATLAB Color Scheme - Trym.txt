@@ -16,3 +16,10 @@ Validation:  (199, 101,  55)  (orange-brown)
 Error Text:  (213,  87,  87)  (Grayish light red)
 Warning Text:(215, 124,  18)  (grayish orange)
 Hyperlinks:  ( 68, 134, 217)  (grayish blue)
+
+Programming Tools:
+
+Automatically highlight:     ( 91, 112,  93)
+Warnings:                    (222, 125,   0)
+Autofix highlight:           (153, 153,  28, alpha:127)
+Variables with shared Scope: (159, 243, 243)
