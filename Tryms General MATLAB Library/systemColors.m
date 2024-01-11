@@ -1,7 +1,7 @@
 function systemColors(colorscheme,options)
    arguments
       colorscheme string {mustBeMember(colorscheme,["Trym's Dark","Christmas"])} = "Trym's Dark";
-      options.ValueType string {mustBeMember(options.ValueType,["TemporaryValue"])} = "TemporaryValue";
+      options.ValueType string {mustBeMember(options.ValueType,["TemporaryValue","PersonalValue","InstallationValue"])} = "TemporaryValue";
    end
 
    s = settings;
