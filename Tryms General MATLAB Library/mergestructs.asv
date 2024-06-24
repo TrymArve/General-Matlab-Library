@@ -24,7 +24,7 @@ function[S] = mergestructsTWO(x,y)
 % All fields of x stay untouched
 % All fields of y that have DIFFERENT names than all fields of x will be
 % added to x.
-% (all fields of y that have the same name as a field of x will be lost)
+% (all fields of y that have the same name as a field of x, will be lost)
 
 Cx = struct2cell(x);
 Cy = struct2cell(y);
