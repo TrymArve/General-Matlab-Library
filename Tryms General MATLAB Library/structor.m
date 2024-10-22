@@ -1,11 +1,65 @@
 classdef structor < handle
 
+   %{
+structor - is meant to be a "struct" data type and a vector (standing
+tuple) at the same time. 
+
+It has a struct-part; "str" and a vector-part; "vec".
+
+The idea is that where you would normally need a vector, you may create a
+stuct instead, so that all variables/values are nicely organized into various fields of the struct, similarly to
+folders in a computer. This way you have more control over the values, and
+it is easier to work with, than a vector where all variables/values are
+bundled into one long vector. Retrieving the values from that vector would
+be a nigtmare.
+
+By using a structor, you may add values to the stuct part;
+"my_stuctor.str", and then access the equivalent vector via the vector
+part; "my_structor.vec".
+
+Whenever the vec property is accessed, the vector is generated based on the
+struct, if it has not already been generated since the last time the str
+property was modified.
+
+The vector that is generated currently has three different ways it stacks
+the elements of the struct into a vector:
+1) "separated": goes throught the fields of the struct, each time adding
+the enitre array stored in the field to the vector, reshaping it to a
+standing vector.
+2) "vector_mixed": goes through all fields, each time only adding the fist
+column of the array stored in the field. This is repeated until all
+fields-arrays have been full added to the vector.
+3) "scalar_mixed": goes through all field of the struct, each time adding
+only the first element of the field-array. repeat until all elements of all
+fields have been added to the vector.
+
+
+If you modify the vector in some way, then need to revtrieve the values,
+you may simply access the correct index my using
+
+"new_vector(my_structor.ind.(*field to access*)", 
+or 
+retrieve the whole structure by using 
+"new_structor = my_structor.retrieve(new_vector)"
+
+
+In the future:
+- "str" will be automatically updated based on updates in the vector part.
+- the class will keep track of what has bee modified, and only re-generate the
+modified parts of the vector/struct
+--- this is a more memory intensive approach than simply recomputing
+everything each time, but it should be faster.
+- upon initializing a new structor, onw may choose the fast or the
+low-memory version.
+   %}
+
+
    properties
-      str (1,1) struct = struct % a structure containing dictionaries
+      str (1,1) struct = struct % a structure containing arrays of stuff
       default_mix (1,1) string {mustBeMember(default_mix,["separated","scalar_mixed","vector_mixed"])} = "separated";
    end
    properties(SetAccess = private)
-      vec (:,1) % vector consisting of all elements of the dictionaries, at indices descbribed by "ind"
+      vec (:,1) % vector consisting of all elements of the arrays of the struct-filds, at indices descbribed by "ind"
       len (1,1) double {mustBeInteger,mustBeNonnegative} = 0 % length of vector "vec" (a.k.a. total numer of elements)
       ind (1,1) struct = struct % a structure that contains the indices of "dic" elements within vector "vec"
    end
@@ -48,20 +102,8 @@ classdef structor < handle
       end
 
 
-      function retrieved_structor = retrieve(C,vector)
-         retrieved_structor = structor(default_mix=C.default_mix);
-         retrieved_structor.str = loop_structure(C.str,C.ind);
 
-         function S_out = loop_structure(S,I)
-            for name = string(fieldnames(S))'
-               if isstruct(S.(name))
-                  S_out.(name) = loop_structure(S.(name),I.(name));
-               else
-                  S_out.(name) = reshape(vector(I.(name)),size(S.(name)));
-               end
-            end
-         end
-      end
+
 
 
       function out = get.vec(C)
@@ -178,16 +220,118 @@ classdef structor < handle
 
 
 
+
+   % Copy etc.
+   methods
+      function new_structor = copy(C)
+         new_structor = structor(default_mix=C.default_mix);
+         new_structor.str = C.str;
+      end
+
+
+      function retrieved_structor = retrieve(C,vector)
+         retrieved_structor = structor(default_mix=C.default_mix);
+         retrieved_structor.str = loop_structure(C.str,C.ind);
+
+         function S_out = loop_structure(S,I)
+            S_out = struct;
+            for name = string(fieldnames(S))'
+               if isstruct(S.(name))
+                  S_out.(name) = loop_structure(S.(name),I.(name));
+               else
+                  S_out.(name) = reshape(vector(I.(name)),size(S.(name)));
+               end
+            end
+         end
+      end
+
+
+      function retrieved_structor = interp(C,original_samples,new_samples)
+         
+         new_samples(new_samples>original_samples(end)) = original_samples(end);
+         new_samples(new_samples<original_samples(1)) = original_samples(1);
+
+         retrieved_structor = structor(default_mix=C.default_mix);
+         retrieved_structor.str = loop_structure(C.str);
+
+         function S_out = loop_structure(S)
+            S_out = struct;
+            for name = string(fieldnames(S))'
+               if isstruct(S.(name))
+                  S_out.(name) = loop_structure(S.(name));
+               else
+                  S_name = S.(name);
+                  org_samp = original_samples;
+                  if size(S.(name),2) < length(original_samples)
+                     org_samp = original_samples(1:size(S.(name),2));
+                  elseif size(S.(name),2) > length(original_samples)
+                     S_name = S.(name)(:,1:length(org_samp));
+                  end
+                  new_samp = new_samples;
+                  new_samp(new_samp > org_samp(end)) = org_samp(end);
+                  new_samp(new_samp < org_samp(1)) = org_samp(1);
+                  S_out.(name) =  transpose(reshape(interp1(reshape(org_samp,[],1),S_name',new_samp),[],size(S.(name),1)));
+               end
+            end
+         end
+      end
+
+      function new_structor = subcopy(C,str)
+         new_structor = structor(default_mix=C.default_mix);
+         new_structor.str = loop_structure(C.str,str);
+
+         function S_out = loop_structure(O,S)
+            S_out = struct;
+            for name = string(fieldnames(S))'
+               if isfield(O,name)
+                  if isstruct(S.(name))
+                     S_out.(name) = loop_structure(O.(name),S.(name));
+                  else
+                     S_out.(name) = O.(name);
+                  end
+               end
+            end
+         end
+      end
+
+      function out = zeros(C)
+         out = C.retrieve(zeros(C.len,1));
+      end
+
+      function out = ones(C)
+         out = C.retrieve(ones(C.len,1));
+      end
+   end
+
+
+
+
    methods(Static)
       function help
-         disp('====== help: "structor" ======')
+         disp(' ')
+         disp('====================== help: "structor" =======================')
          disp(' - PROPERTIES:')
-         disp('     "str" - a structure containing fields that are either cell arrays or dictionaries.')
-         disp('     "vec" - a vector containing all end-elements of "str".')
-         disp('     "len" - the length of "vec".')
-         disp('     "ind" - a copy of the "str" structure, but the values are instead the indices of the elements position within "vec".')
+         disp('            "str" - a structure containing fields that are either cell arrays or dictionaries.')
+         disp('            "vec" - a vector containing all end-elements of "str".')
+         disp('            "len" - the length of "vec".')
+         disp('            "ind" - a copy of the "str" structure, but the values are instead the indices of the elements position within "vec".')
+         disp(' "default_mixing" - the order in which to mix the elements of the struct-fields into a single vector.')
+         disp('                    ->     "separated": stacks the fields in order of appearance in the struct.')
+         disp('                    ->  "vector_mixed": stacks the first column of each struct-field, then the second columns, etc.')
+         disp('                    ->  "scalar_mixed": adds first element of each struct-field, then the second element, etc.')
          disp(' - METHODS:')
          disp('     "genvec" - generates "vec", and updates "ind".')
+         disp('       "copy" - creates a copy of the sturctor instance. This is handy since the class is a handle-class.')
+         disp('    "subcopy" - creates a copy only of the fields similar to the reference structure provided by argument.')
+         disp('   "retrieve" - creates a new structor with the same fields as the current structor, where the struct-fields are based on the vector you provide.')
+         disp('                 This enables you to generate a vector of your sturct, then modify the vector and retrieve the equivalent struct from that changed vector.')
+         disp('     "interp" - creates a new structor where all fields are interpolated based on an "original" sample vector and a "new" sample vector.')
+         disp('                 Each field is linearly interpolated as if the columns are the values at each sample.')
+         disp('                 i.e: the number of columns of each field must be the same as the number elements of the "original" sample vector.')
+         disp('                 The output stuct-fields then have the same number of columns as the "new" sample vector.')
+         disp('                  (if any struct-field has fewer columns than elements of the original sample vector, then the columns are mapped to the first elements of the sample vector, and the rest are ignored.)')
+         disp('===============================================================')
+         disp(' ')
       end
 
    end
