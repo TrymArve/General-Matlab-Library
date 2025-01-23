@@ -45,11 +45,11 @@ retrieve the whole structure by using
 
 In the future:
 - "str" will be automatically updated based on updates in the vector part.
-- the class will keep track of what has bee modified, and only re-generate the
+- the class will keep track of what has been modified, and only re-generate the
 modified parts of the vector/struct
 --- this is a more memory intensive approach than simply recomputing
 everything each time, but it should be faster.
-- upon initializing a new structor, onw may choose the fast or the
+- upon initializing a new structor, one may choose the fast or the
 low-memory version.
    %}
 
@@ -85,6 +85,11 @@ low-memory version.
          C.str = in;
          C.vec = []; %#ok<MCSUP>
          C.flag_genvec = false; %#ok<MCSUP>
+         % OOBS ! Be aware that displaying the structor in the command
+         % windonw, by f.ex not ending a line of code with a semicolon,
+         % will trigger the generation of "vec" (via "genvec"), since
+         % MATLAB triggers the "get.vec" funciton when obtaining the values
+         % to display.
       end
 
  
