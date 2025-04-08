@@ -51,12 +51,25 @@ modified parts of the vector/struct
 everything each time, but it should be faster.
 - upon initializing a new structor, one may choose the fast or the
 low-memory version.
+- Add "order" to change field order, and make the "mix" only determine what
+to extract from each field.
    %}
 
 
    properties
       str (1,1) struct = struct % a structure containing arrays of stuff
-      default_mix (1,1) string {mustBeMember(default_mix,["separated","scalar_mixed","vector_mixed"])} = "separated";
+      default_mix (1,1) string  = "separated";
+      %{
+            Note: "separated","scalar_mixed","vector_mixed" are legacy
+            names, and are replaced with "all","matrix","column", "row", "element"
+            These names refer to what to extract from a field, and apply to
+            vector before moving on to next field.
+
+            The new setting: "default_order" refers to in what order to
+            traverse fields.
+      %}
+      
+      default_order (1,1) string {mustBeMember(default_order,["shallow","deep"])} = "shallow"; 
    end
    properties(SetAccess = private)
       vec (:,1) % vector consisting of all elements of the arrays of the struct-filds, at indices descbribed by "ind"
@@ -74,7 +87,7 @@ low-memory version.
       % Constructor
       function C = structor(options)
          arguments
-            options.default_mix (1,1) string {mustBeMember(options.default_mix,["separated","scalar_mixed","vector_mixed"])}
+            options.default_mix (1,1) string {mustBeMember(options.default_mix,["all","matrix","column", "row", "element",    "separated","scalar_mixed","vector_mixed",  "shallow", "TRYMPC_horizon"])}
          end
          if isfield(options,'default_mix')
             C.default_mix = options.default_mix;
@@ -84,6 +97,7 @@ low-memory version.
       function set.str(C,in)
          C.str = in;
          C.vec = []; %#ok<MCSUP>
+         C.len = 0; %#ok<MCSUP>
          C.flag_genvec = false; %#ok<MCSUP>
          % OOBS ! Be aware that displaying the structor in the command
          % windonw, by f.ex not ending a line of code with a semicolon,
@@ -98,11 +112,10 @@ low-memory version.
       function out = genvec(C,structure)
          arguments
             C
-            structure (1,1) string {mustBeMember(structure,["separated","scalar_mixed","vector_mixed"])} = C.default_mix;
+            structure (1,1) string {mustBeMember(structure,["all","matrix","column", "row", "element",    "separated","scalar_mixed","vector_mixed",  "shallow", "TRYMPC_horizon"])} = C.default_mix;
          end
-         C.(['genvec_',char(structure)])
+         C.vec = structor.(['genvec_',char(structure)])(C);
          C.flag_genvec = true;
-
          out = C.vec;
       end
 
@@ -117,16 +130,230 @@ low-memory version.
          else
             out = C.genvec;
          end
+         C.len = length(C.vec);
+      end
+
+
+   end
+
+
+   methods(Static)
+      function out = subvec(C,str,structure) % WARNING !! THIS FUNCTION IS ONLY TO BE USED AS A STATIC
+         arguments
+            C (1,1) structor
+            str (1,1) struct
+            structure (1,1) string {mustBeMember(structure,["all","matrix","column", "row", "element",    "separated","scalar_mixed","vector_mixed",  "shallow", "TRYMPC_horizon"])} = C.default_mix;
+         end
+         out = structor.(['genvec_',char(structure)])(structor,str);
       end
    end
 
 
+   methods(Access = private,Static)
 
-   methods(Access = private)
-      function genvec_separated(C)
+
+
+
+
+      function vector = genvec_TRYMPC_horizon(C,S)
+         arguments
+            C
+            S = C.str;
+         end
+
          vector = [];
          C.len = 0;
-         C.ind = loop_structure(C.str);
+         C.ind = while_structure(S);
+
+
+         function I = while_structure(S)
+            I = struct;
+
+            while ~isempty(fieldnames(S))
+               for name = string(fieldnames(S))'
+                  if isstruct(S.(name))
+                     % Separated Mixing:
+                     if isempty(fieldnames(S.(name)))
+                        S = rmfield(S,name);
+                     else
+                        fields = fieldnames(S.(name));
+                        if isstruct(S.(name).(fields{1}))
+                           I.(name).(fields{1}) = loop_structure(S.(name).(fields{1}));
+                        else
+                           if ~iscell(S.(name).(fields{1}))
+                              indices = add({S.(name).(fields{1})});
+                              I.(name).(fields{1}) = indices{:};
+                           else
+                              I.(name).(fields{1}) = add(S.(name).(fields{1}));
+                           end
+                        end
+                        S.(name) = rmfield(S.(name),fields{1});
+                     end
+                  else
+                     vector_add
+                  end
+               end
+            end
+
+            function vector_add()
+               % Vector Mixing:
+               if ~isfield(I,name)
+                  I.(name) = [];
+               end
+               to_add = S.(name)(:,1);
+               vector = [vector; to_add];
+               I.(name) = [I.(name) C.len+(1:numel(to_add))'];
+               C.len = C.len + numel(to_add);
+               S.(name) = S.(name)(:,2:end);
+               % Remove field if approriate:
+               if ~numel(S.(name))
+                  S = rmfield(S,name);
+               end
+            end
+
+            function I = loop_structure(S)
+               I = struct;
+               for inner_name= string(fieldnames(S))'
+                  if isstruct(S.(inner_name))
+                     I.(inner_name) = loop_structure(S.(inner_name));
+                  else
+                     if ~iscell(S.(inner_name))
+                        indices = add({S.(inner_name)});
+                        I.(inner_name) = indices{:};
+                     else
+                        I.(inner_name) = add(S.(inner_name));
+                     end
+                  end
+               end
+            end
+
+            function indices = add(array)
+               sz = size(array);
+               indices = cell(sz);
+               for i_1 = 1:sz(1)
+                  for i_2 = 1:sz(2)
+                     object = array{i_1,i_2};
+                     N_elements = numel(object);
+                     indices{i_1,i_2} = C.len + reshape(1:N_elements,size(object));
+                     vector = [vector; reshape(object,N_elements,1)]; %#ok<AGROW>
+                     C.len = C.len + N_elements;
+                  end
+               end
+            end
+         end
+      end
+
+
+
+
+
+
+
+
+
+      % This one does shallow first for one level, then the rest is depth
+      % first
+      function vector = genvec_shallow(C,S)
+         arguments
+            C
+            S = C.str;
+         end
+
+         vector = [];
+         C.len = 0;
+         C.ind = shallow_looping(S);
+
+         
+         function I = shallow_looping(S)
+            I = struct;
+            names = string(fieldnames(S))';
+            L = length(names);
+
+            counter = 0;
+            while ~isempty(fieldnames(S))
+               counter = counter + 1;
+               name = names(counter);
+               if isfield(S,name) 
+                  if isstruct(S.(name))
+                     fields = fieldnames(S.(name));
+
+                     if isstruct(S.(name).(fields{1}))
+                        I.(name) = loop_structure(S.(name));
+                     else
+                        if ~iscell(S.(name).(fields{1}))
+                           indices = add({S.(name).(fields{1})});
+                           I.(name).(fields{1}) = indices{:};
+                        else
+                           I.(name).(fields{1}) = add(S.(name).(fields{1}));
+                        end
+                     end
+
+                     S.(name) = rmfield(S.(name),fields{1});
+                     if isempty(fieldnames(S.(name)))
+                        S = rmfield(S,name);
+                     end
+                  else
+                     if ~iscell(S.(name))
+                        indices = add({S.(name)});
+                        I.(name) = indices{:};
+                     else
+                        I.(name) = add(S.(name));
+                     end
+                     S = rmfield(S,name);
+                     % names(counter) = [];
+                  end
+               end
+               counter = mod(counter,L); % reset counter if we are at last fieldname of S (go back to first)
+            end
+         end
+
+         function I = loop_structure(S)
+            I = struct;
+            for name = string(fieldnames(S))'
+               if isstruct(S.(name))
+                  I.(name) = loop_structure(S.(name));
+               else
+                  if ~iscell(S.(name))
+                     indices = add({S.(name)});
+                     I.(name) = indices{:};
+                  else
+                     I.(name) = add(S.(name));
+                  end
+               end
+            end
+         end
+
+         function indices = add(array)
+           sz = size(array);
+            indices = cell(sz);
+            for i_1 = 1:sz(1)
+               for i_2 = 1:sz(2)
+                  object = array{i_1,i_2};
+                  N_elements = numel(object);
+                  indices{i_1,i_2} = C.len + reshape(1:N_elements,size(object));
+                  vector = [vector; reshape(object,N_elements,1)]; %#ok<AGROW>
+                  C.len = C.len + N_elements;
+               end
+            end
+         end
+      end
+
+
+
+
+
+
+
+
+      function vector = genvec_separated(C,S)
+         arguments
+            C
+            S = C.str;
+         end
+
+         vector = [];
+         C.len = 0;
+         C.ind = loop_structure(S);
          
          function I = loop_structure(S)
             I = struct;
@@ -157,14 +384,18 @@ low-memory version.
                end
             end
          end
-         C.vec = vector;
+         % C.vec = vector;
       end
 
-      function genvec_scalar_mixed(C)
+      function vector = genvec_scalar_mixed(C,S)
+         arguments
+            C
+            S = C.str;
+         end
 
          vector = [];
          C.len = 0;
-         C.ind = loop_structure(C.str);
+         C.ind = loop_structure(S);
          
          function I = loop_structure(S)
             I = struct;
@@ -188,14 +419,18 @@ low-memory version.
                end
             end
          end
-         C.vec = vector;
+         % C.vec = vector;
       end
 
-      function genvec_vector_mixed(C)
+      function vector = genvec_vector_mixed(C,S)
+         arguments
+            C
+            S = C.str;
+         end
 
          vector = [];
          C.len = 0;
-         C.ind = loop_structure(C.str);
+         C.ind = loop_structure(S);
          
          function I = loop_structure(S)
             I = struct;
@@ -219,9 +454,21 @@ low-memory version.
                end
             end
          end
-         C.vec = vector;
+         % C.vec = vector;
       end
    end
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

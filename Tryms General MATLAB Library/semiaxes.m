@@ -1,0 +1,6 @@
+function [SA,or2sa,sa2or] = semiaxes(M)
+   [V, D] = eig(M);
+   SA = V*diag(1./sqrt(diag(D))); % Semi axes linear transformation matrix (form sa to or)
+   or2sa = @(x) SA\x; % vector from original basis to semi-axis basis
+   sa2or = @(x) SA*x; % vector from semi-axis basis to original basis
+end

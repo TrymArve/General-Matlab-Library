@@ -1,7 +1,7 @@
 function[S] = mergestructs(x)
 
 % merge structs.
-% use any number of arguments two concatinate any number of structs:
+% use any number of arguments two merge any number of structs:
 %     "mergestructs(x,y,z,...)"
 
 % when several structs have equal fieldnames, the field of the LEFTmost of
