@@ -98,6 +98,7 @@ to extract from each field.
          C.str = in;
          C.vec = []; %#ok<MCSUP>
          C.len = 0; %#ok<MCSUP>
+         C.ind = struct; %#ok<MCSUP>
          C.flag_genvec = false; %#ok<MCSUP>
          % OOBS ! Be aware that displaying the structor in the command
          % windonw, by f.ex not ending a line of code with a semicolon,
@@ -133,6 +134,14 @@ to extract from each field.
          C.len = length(C.vec);
       end
 
+      function out = get.ind(C)
+         if ~C.flag_genvec
+            disp(C.ind)
+            C.genvec;
+            disp(C.ind)
+         end
+         out = C.ind;
+      end
 
    end
 
@@ -485,6 +494,8 @@ to extract from each field.
          retrieved_structor = structor(default_mix=C.default_mix);
          retrieved_structor.str = loop_structure(C.str,C.ind);
 
+         
+
          function S_out = loop_structure(S,I)
             S_out = struct;
             for name = string(fieldnames(S))'
@@ -547,6 +558,7 @@ to extract from each field.
       end
 
       function out = zeros(C)
+         C.genvec;
          out = C.retrieve(zeros(C.len,1));
       end
 
