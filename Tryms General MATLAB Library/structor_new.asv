@@ -54,8 +54,8 @@ classdef structor_new < handle
 
    % ===============================
    % Miscellaneous Properties:
-   properties(SetAccess = private)
-      len (1,1) double {mustBeNonnegative,mustBeInteger} = 0; % length of vec
+   properties(Dependent)
+      len (1,1) double {mustBeNonnegative,mustBeInteger} % length of vec
    end
 
 
@@ -67,8 +67,8 @@ classdef structor_new < handle
    properties(SetAccess = public, Hidden)
       data (:,1) dictionary = dictionary; % this is the internal data-vector that contains all the actual values of the structor. The keys are data-IDs that are stored in the 'str' variable.
       data_length (1,1) double {mustBeNonnegative,mustBeInteger} = 0; % simply keeps track of the number of entreis in "data", to avoid calling "numEntries".
-      node_ID (:,1) dictionary = dictionary; % This dictionary contains the placement of each node in the struct-hierarchy. The key is the same as in "data".
-      node_ID_length (1,1) double {mustBeNonnegative,mustBeInteger} = 0; % keeps track of the number of nodes in the struct-hierarchy
+      % node_ID (:,1) dictionary = dictionary; % This dictionary contains the placement of each node in the struct-hierarchy. The key is the same as in "data".
+      % node_ID_length (1,1) double {mustBeNonnegative,mustBeInteger} = 0; % keeps track of the number of nodes in the struct-hierarchy
       map (:,1) double = [] % a map from the struct index to the new mixed index in the vector.
       node_tree (1,1) dictionary = dictionary % Maps node-IDs to the data-ID
       %{
@@ -91,13 +91,15 @@ classdef structor_new < handle
 
    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Constructor:
    methods
-      function C = structor_new(default_mix,default_depth)
+      function C = structor_new(default_mix,default_structure,default_depth)
          arguments
             default_mix (1,1) string {mustBeMember(default_mix,["column","row","scalar","bulk"])} = "bulk";
+            default_structure (1,1) string {mustBeMember(default_structure,["first-fields-first","shallow-values-first","bredth-to-first"])} = "first-fields-first";
             default_depth (1,1) double  {mustBeInteger,mustBeNonnegative}  = 0;
          end
 
          C.default_mix = default_mix;
+         C.default_structure = default_structure;
          C.default_depth = default_depth;
       end
    end
@@ -179,7 +181,8 @@ classdef structor_new < handle
                if set_like_normal
                   % Field does not exists, and must be properly
                   % initialized:
-                  initialize_str_field
+                  % initialize_str_field
+                  value = C.initialize_str_field(value);
                else % The field does already exist, and we need to handle the change correctly:
                   
                   % Note that S is now the "current value". We rename for
@@ -198,7 +201,7 @@ classdef structor_new < handle
                         C.data(current_value) = value;
                      else % The dimensions are different, so we delete the previous data and re-initialize.
                         C.data(current_value) = []; % delete old data
-                        initialize_str_field % re-initialize like a normal set operation for fields that don't exist.
+                        value = C.initialize_str_field(value); % re-initialize like a normal set operation for fields that don't exist.
                      end
 
                   elseif index_composition(end).type == "{}"
@@ -234,9 +237,7 @@ classdef structor_new < handle
 
 
             case "len"
-               disp("Setting the C.len property.")
             case "map"
-               disp(" - - - - - setting map")
          end
 
 
@@ -245,20 +246,6 @@ classdef structor_new < handle
             C = builtin('subsasgn', C, index_composition, value);
          end
 
-
-
-         function initialize_str_field
-            C.flag_must_build_structure = true;
-            C.flag_must_identify_nodes = true;
-
-            inds = reshape(1:numel(value),size(value));
-            C.data(C.data_length + inds) = value;
-            value = C.data_length + inds;
-            C.data_length = value(end);
-
-            C.node_ID_length = C.node_ID_length + 1;
-            C.node_ID(value) = C.node_ID_length;
-         end
       end
 
 
@@ -274,17 +261,64 @@ classdef structor_new < handle
             % equivalent field in the str-property, creating inconsistency.
             error("USER ERROR: You may only set the 'vec'-property if the length is not changed. This is . You may add new elements by adding the values to the 'str'-property instead. Note: You may also directly redefine values of individulal elements of vec, by using indexing. Ex: myStructor.vec(5) = *newvalue*;")
          end
-
-         C.data(C.map) = in;
+         C.data = dictionary(C.map,in);
       end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
       % -------------- GET FUNCTIONS:
 
       function value = subsref(C,index_composition)
-         if ~isprop(C,index_composition(1).subs)
-            builtin('subsref', C, index_composition);
-         else
-            value = builtin('subsref', C, index_composition);
+         % if ~isprop(C,index_composition(1).subs)
+         %    value = builtin('subsref', C, index_composition);
+         % else
+         if nargout > 0
+            value = [];
+         end
+
+
+
+         %%%%%%%%%%%%%% Custom indexing for creating subcopies:
+         if index_composition(1).subs == "str" && length(index_composition) > 1 && all(cellfun(@(type) string(type),{index_composition(1:end-1).type}) == ".") && index_composition(end).type == "()" && isempty(index_composition(end).subs)
+            new_str = builtin('subsref', C.str, index_composition(2:end-1));
+            if isstruct(new_str)
+               value = C.preCopy;
+               subcopy_keys = C.struct_to_vec(new_str,[]);
+               value.set_data(subcopy_keys,C.data(subcopy_keys))
+               value.str = new_str;
+               return;
+            end
+
+         end
+
+
+
+
+
+
+            try
+               value = builtin('subsref', C, index_composition);  % Try to capture output
+            catch ME
+               if strcmp(ME.identifier, 'MATLAB:TooManyOutputs')
+                  % Function does not return output
+                  builtin('subsref', C, index_composition); % call without output
+               else
+                  rethrow(ME);  % Re-throw unexpected errors
+               end
+            end
+
 
             switch index_composition(1).subs
                case "str"
@@ -292,20 +326,28 @@ classdef structor_new < handle
                      % Override output, and return the correct data:
                      value = C.data(value);
                   else
-                     warning('The struct field values are not the actual data, but pointer to the data. To access the data itself, access the field value directly, not the whole struct.')
+                     % to get all the correct values, we need to do a loop,
+                     % similar to when we traverse the struct to identify
+                     % nodes.
+                     value = C.convert_to_data_struct(value);
                   end
                otherwise
                   % do nothing, rely on the normal matlab procedure.
             end
 
 
-         end
+         % end
+
+
+
+
+
       end
 
 
       function out = get.vec(C)
          if C.flag_must_build_structure
-            C.build_structure 
+            C.build_structure;
          end
          out = C.data(C.map);
       end
@@ -316,9 +358,9 @@ classdef structor_new < handle
 
       function out = get.len(C)
          if C.flag_must_build_structure
-            C.build_structure
+            C.build_structure;
          end
-         out = C.len;
+         out = length(C.vec);
       end
 
 
@@ -340,7 +382,7 @@ classdef structor_new < handle
          % This function takes reoranizes "map" so as to extract the data
          % in the correct order
 
-         % Enusre the node_tree is up to date
+         % Ensure the node_tree is up to date
          if C.flag_must_identify_nodes
             C.identify_nodes
          end
@@ -435,10 +477,74 @@ classdef structor_new < handle
    methods(Access = private)
 
 
-      function identify_nodes(C)
+      %%%%%%%%%%%%%% VARIOUS RECUSTIVE STRUCT TRAVERSAL METHODS
+      function initialize_struct(C,S)
+         
+         C.str = traverse_to_initialize(S);
+         
+         function S = traverse_to_initialize(S)
+            for name = string(fieldnames(S))'
+               if isstruct(S.(name))
+                  S.(name) = traverse_to_initialize(S.(name));
+               else
+                  S.(name) = C.initialize_str_field(S.(name));
+               end
+            end
+         end
+      end
 
-         C.node_tree = dictionary;
-         traverse_struct(C.str,[])
+      function [vector,S] = struct_to_vec(C,S,vector)
+         for name = string(fieldnames(S))'
+            if isstruct(S.(name))
+               [vector,S.(name)] = C.struct_to_vec(S.(name),vector);
+            else
+               vector = [vector; reshape(S.(name),[],1)];
+            end
+         end
+      end
+
+      function S = convert_to_data_struct(C,S)
+         for name = string(fieldnames(S))'
+            if isstruct(S.(name))
+               S.(name) = C.convert_to_data_struct(S.(name));
+            else
+               S.(name) = C.data(S.(name));
+            end
+         end
+      end
+
+
+      %%%% INITIALIZE STRUCT VALUES!
+      function value = initialize_str_field(C,value)
+         C.flag_must_build_structure = true;
+         C.flag_must_identify_nodes = true;
+
+         inds = reshape(1:numel(value),size(value));
+         C.data(C.data_length + inds) = value;
+         value = C.data_length + inds;
+         C.data_length = value(end);
+      end
+
+
+      function node_tree_temp = identify_nodes(C,options)
+         arguments
+            C
+            options.str (1,1) struct
+         end
+
+         if isfield(options,'str')
+            S = options.str;
+         else
+            S = C.str;
+         end
+
+         node_tree_temp = dictionary;
+         traverse_struct(S,[])
+
+         if nargout == 0
+            C.node_tree = node_tree_temp;
+            clear('node_tree_temp')
+         end
 
          function traverse_struct(S,ID)
             counter = 0;
@@ -448,134 +554,62 @@ classdef structor_new < handle
                if isstruct(S.(name))
                   traverse_struct(S.(name),tempID);
                else
-                  C.node_tree({tempID}) = {[S.(name)]};
+                  node_tree_temp({tempID}) = {[S.(name)]};
                end
                S = rmfield(S,name);
             end
          end
       end
 
-      % function gen_vec(C)
-      %    data_map = [];
-      %    struct_queue = {};
-      %    bredth_first(C.str,0);
-      %    C.map = data_map;
-      %    C.len = length(C.map);
-      %    C.flag_must_generate_vector = false;
-      % 
-      % 
-      % 
-      %    function bredth_first(S,depth)
-      %       for name = string(fieldnames(S))'
-      %          if isstruct(S.(name))
-      %             if depth >= C.default_depth
-      %                struct_queue{end+1} = S.(name);
-      %             else
-      %                bredth_first(S.(name),depth+1);
-      %             end
-      %          else
-      %             temp_S.name = S.(name);
-      %             struct_queue{end+1} = temp_S;
-      %          end
-      %       end
-      %    end
-      % 
-      % 
-      %    function depth_first(S)
-      %       names = string(fieldnames(S))';
-      %       i = 0;
-      %       while ~isempty(names)
-      %          i = mod(i,length(names))+1;
-      %          name = names(i);
-      %          if isstruct(S.(name))
-      %             depth_first(S.(name));
-      %             remove_field
-      %          else
-      %             switch C.default_mix
-      %                case "bulk"
-      %                   inds = reshape(S.(name),[],1);
-      %                   S.(name) = [];
-      %                case "column"
-      %                   inds = S.(name)(:,1);
-      %                   S.(name)(:,1) = [];
-      %                case "row"
-      %                   inds = reshape(S.(name)(1,:),[],1);
-      %                   S.(name)(1,:) = [];
-      %                case "scalar"
-      %                   S.(name) = reshape(S.(name),[],1);
-      %                   inds = S.(name)(1);
-      %                   S.(name)(1) = [];
-      %             end
-      %             data_map = [data_map; inds];
-      % 
-      %             if isempty(S.(name))
-      %                remove_field
-      %             end
-      %          end
-      %       end
-      % 
-      % 
-      %       function remove_field
-      %          S = rmfield(S,name);
-      %          names(i) = [];
-      %          i=i-1;
-      %       end
-      %    end
-      % 
-      % 
 
+      function subtrees = split_to_groups(C,K,depth_to_go,current_depth)
 
-         function subtrees = split_to_groups(C,K,depth_to_go,current_depth)
+         subtrees = configureDictionary('double','cell');
 
-            subtrees = configureDictionary('double','cell');
+         for i = 1:length(K)
+            key = K(i);
+            sorting_int = key{1}(min(current_depth,length(key{1})));
 
-            for i = 1:length(K)
-               key = K(i);
-               sorting_int = key{1}(min(current_depth,length(key{1})));
-
-               if ~isKey(subtrees,sorting_int)
-                  subtrees(sorting_int) = {{}};
-               end
-
-               subtrees{sorting_int}(end+1) = key;
+            if ~isKey(subtrees,sorting_int)
+               subtrees(sorting_int) = {{}};
             end
 
-            
-            if depth_to_go > 1 && numEntries(subtrees) > 1
-               new_V = {};
-               for i = 1:numEntries(subtrees)
-                  subsubtrees = C.split_to_groups(subtrees{i},depth_to_go-1,current_depth+1);
-                  new_V = [new_V; subsubtrees.values];
-               end
-               subtrees = dictionary(1:length(new_V),new_V');
-            end
+            subtrees{sorting_int}(end+1) = key;
          end
 
 
-         function Nodes = bredth_first(C,K,depth)
-
-            if depth == 0
-               depth = inf;
+         if depth_to_go > 1 && numEntries(subtrees) > 1
+            new_V = {};
+            for i = 1:numEntries(subtrees)
+               subsubtrees = C.split_to_groups(subtrees{i},depth_to_go-1,current_depth+1);
+               new_V = [new_V; subsubtrees.values];
             end
-            subtrees = C.split_to_groups(K,depth,1);
-
-            Nodes = {};
-            while numEntries(subtrees) > 0
-               for k = keys(subtrees)'
-                  Nodes{end+1} = subtrees{k}{1};
-                  subtrees{k}(1) = [];
-                  if isempty(subtrees{k})
-                     subtrees = remove(subtrees,k);
-                  end
-               end
-            end
+            subtrees = dictionary(1:length(new_V),new_V');
          end
-
-
-
-
-
       end
+
+
+      function Nodes = bredth_first(C,K,depth)
+
+         if depth == 0
+            depth = inf;
+         end
+         subtrees = C.split_to_groups(K,depth,1);
+
+         Nodes = {};
+         while numEntries(subtrees) > 0
+            for k = keys(subtrees)'
+               Nodes{end+1} = subtrees{k}{1};
+               subtrees{k}(1) = [];
+               if isempty(subtrees{k})
+                  subtrees = remove(subtrees,k);
+               end
+            end
+         end
+      end
+
+
+   end
 
 
 
@@ -587,29 +621,226 @@ classdef structor_new < handle
 
    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Miscellaneous User-methods:
    methods
-      function C_copy = copy(C)
 
+      % make a copy of the structor instance (note that this is a handle class)
+      function C_copy = copy(C,new_value)
+         arguments
+            C
+            new_value (1,1) = {[]}; % if this is set, then the copied structor have this value at all fields
+         end
+         C_copy = C.preCopy;
+         C_copy.str = C.str;
+
+         if iscell(new_value) && isempty(new_value{1})
+            % copy all data to create identical copy
+            C_copy.set_data(C.data.keys,C.data.values);
+         else
+            % set all data values of the copy to new_value
+            C_copy.set_data(C.data.keys,new_value);
+         end
+         
       end
 
       function C_zeros = zeros(C)
-
+         C_zeros = C.copy(0); % create a copy with all entries being 0
       end
 
       function C_ones = ones(C)
+         C_ones = C.copy(1); % create a copy with all entries being 1
+      end
+
+
+      function C_retrieved = retrieve(C,vector)
+         % In term of functionality, this is obsolete, since one can just
+         % create a copy and set the vec directly to "vector". Then the str
+         % is also updated accordingly...
+         % To support old code, we include this funciton.
+
+         C_retrieved = C.zeros;
+         C_retrieved.vec = vector;
 
       end
 
-      function C_interp = interp(C)
+      function C_interp = interp(C,original_samples,new_samples)
+         
+         % Interpolation only works for doubles:
+         [~,val_type] = types(C.data);
+         if val_type ~= "double"
+            errro("USER ERROR: You are trying to perform interpolation of a non-double datatype. You have: " + val_type)
+         end
 
-      end
 
-      function C_subcopy = subcopy(C)
+         % Make sure that the new samples don't exceed the edge-samles of
+         % the original samples. (we don't want to extrapolate)
+         new_samples(new_samples>original_samples(end)) = original_samples(end);
+         new_samples(new_samples<original_samples(1)) = original_samples(1);
 
-      end
 
-      function C_retrieved = retrieve(C)
-         % may be obsolete?
+         C_interp = C.preCopy;
+         S = C.convert_to_data_struct(C.str);
+         S_interp = loop_structure(S);
+         C_interp.initialize_struct(S_interp);
+
+         function S_out = loop_structure(S)
+            S_out = struct;
+            for name = string(fieldnames(S))'
+               if isstruct(S.(name))
+                  S_out.(name) = loop_structure(S.(name));
+               else
+                  S_name = S.(name);
+                  org_samp = original_samples;
+                  if size(S.(name),2) < length(original_samples)
+                     org_samp = original_samples(1:size(S.(name),2));
+                  elseif size(S.(name),2) > length(original_samples)
+                     S_name = S.(name)(:,1:length(org_samp));
+                  end
+                  new_samp = new_samples;
+                  new_samp(new_samp > org_samp(end)) = org_samp(end);
+                  new_samp(new_samp < org_samp(1)) = org_samp(1);
+                  S_out.(name) =  transpose(reshape(interp1(reshape(org_samp,[],1),S_name',new_samp),[],size(S.(name),1)));
+               end
+            end
+         end
       end
    end
 
+
+
+   % Functions callable from other structor instances
+   methods(Access = ?structor_new)
+      function set_data(C,new_keys,new_values)
+         C.data = dictionary(new_keys,new_values);
+      end
+   end
+
+
+
+   % Utility helper functions:
+   methods(Access = private)
+      function pC = preCopy(C)
+         pC = structor_new(C.default_mix,C.default_structure,C.default_depth);
+      end
+   end
+
+
+
+
+
+   %%%%%%%%%%%%% Help:
+   methods(Static)
+      function help
+         disp(' ')
+         disp('====================== help: "structor" =======================')
+         disp(' - PROPERTIES:')
+         disp('            "str" - a struct containing data in various fields/substructs.')
+         disp('            "vec" - a vector containing all end-fields of "str" in a specific order, defined by "mix" and "structure".')
+         disp('            "len" - the length of "vec".')
+         disp(' - METHODS:')
+         disp('       "copy" - creates a copy of the sturctor instance. This is handy since the class is a handle-class.')
+         disp('    *subcopy* - To create that only contains a substruct of the original struct-hierarchy, use the special syntax: "C_subcopy = C.str.substr1()" That is, use empty parantheses to create a copy containing only the substruct.')
+         disp('                 This enables you to generate a vector of your sturct, then modify the vector and retrieve the equivalent struct from that changed vector.')
+         disp('      "zeros" - creates a copy of the sturctor instance with all values equal to 0.')
+         disp('       "ones" - creates a copy of the sturctor instance with all values equal to 1.')
+         disp('     "interp" - creates a new structor where all fields are interpolated based on an "original" sample vector and a "new" sample vector.')
+         disp('                 Each field is linearly interpolated as if the columns are the values at each sample.')
+         disp('                 i.e: the number of columns of each field must be the same as the number elements of the "original" sample vector.')
+         disp('                 The output stuct-fields then have the same number of columns as the "new" sample vector.')
+         disp('                  (if any struct-field has fewer columns than elements of the original sample vector, then the columns are mapped to the first elements of the sample vector, and the rest are ignored.)')
+         disp('   "retrieve" - OBSOLETE. creates a new structor with the same fields as the current structor, where the struct-fields are based on the vector you provide.')
+         disp('===============================================================')
+         disp(' ')
+      end
+
+   end
+
 end
+
+
+%%%%%%%%%%% Some code to test the structor functionality...
+
+% 
+% C = structor_new("bulk","first-fields-first");
+% 
+% C.str.a1.a2 = ["aa11","aa21"; "aa12","aa22"];
+% C.str.a1.b2 = "ab";
+% C.str.b1 = "b";
+% C.str.c1.a2.a3 = "caa";
+% C.str.c1.a2.b3 = "cab";
+% C.str.c1.b2 = "cb";
+% C.str.a1.c2 = "ac";
+% C.str.c1.a2.c3.a4 = ["caca11", "caca12"];
+% 
+% disp("====== str:")
+% C.str
+% disp("====== data:")
+% C.data
+% disp("====== vec:")
+% C.vec
+% disp("====== map:")
+% C.map
+% disp("====== node_tree:")
+% C.node_tree
+% 
+% 
+% %%
+% 
+% C.build_structure("shallow-values-first")
+% C.vec
+% 
+% C.build_structure("bredth-to-first","bulk",1);
+% C.vec
+% 
+% C.build_structure("bredth-to-first","bulk",0);
+% C.vec
+% 
+% 
+% %%
+% 
+% C.vec(4) = "new value!";
+% 
+% C.str.ne.b2.nonexistant = "another new value!!";
+% 
+% C.vec
+% 
+% C.str.a1.a2 = "setting the whole thing at once";
+% 
+% %%
+% 
+% C.str.a1.a2(1,2) = "indexed!";
+% C.vec
+% 
+% %%
+% 
+% C.build_structure("shallow-values-first","column");
+% C.vec
+% 
+% 
+% %%
+% 
+% C_copy = C.copy;
+% C_copy.vec
+% 
+% C_zeros = C.zeros;
+% C_zeros.str
+% 
+% C_ones = C.ones;
+% C_ones.vec
+% 
+% C_subcopy = C.str.a1();
+% C_subcopy.vec
+% 
+% 
+% %%
+% 
+% C = structor_new("column");
+% C.str.X = [ 1  2  3  4;
+%            10 20 30 40];
+% C.str.U = [200 400 600 800];
+% 
+% disp('Non-interpolated:')
+% C.vec
+% 
+% C_interp = C.interp([1:4],[1:4]+0.5);
+% 
+% disp('interpolated:')
+% C_interp.vec
