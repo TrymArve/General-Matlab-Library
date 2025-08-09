@@ -220,7 +220,7 @@ to extract from each field.
                end
             end
 
-            function I = loop_structure(S)
+            function I = loop_structure(S) % standard "first-fields-first" traversal
                I = struct;
                for inner_name= string(fieldnames(S))'
                   if isstruct(S.(inner_name))

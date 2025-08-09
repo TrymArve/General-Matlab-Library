@@ -144,7 +144,7 @@ classdef structor2 < handle
 
                % Get the current field value, if already a field:
                set_like_normal = false; % assume we are rewriting an old value, which does not require the builtin function afterwards.
-               S = C.str;
+               S = C.str; 
                for i = 2:length(index_composition)
                   if index_composition(i).type == "." 
                      if isfield(S,index_composition(i).subs)
@@ -178,11 +178,21 @@ classdef structor2 < handle
 
 
 
-               if set_like_normal
-                  % Field does not exists, and must be properly
-                  % initialized:
-                  % initialize_str_field
-                  value = C.initialize_str_field(value);
+               if set_like_normal || isempty(S) 
+                  if ~isstruct(value)
+                     % Field does not exists (or the field exists, but contains only an empty double, which has not been stored in data), and must be properly
+                     % initialized:
+                     % initialize_str_field
+                     value = C.initialize_str_field(value);
+                     set_like_normal = true; % In case you enter here from the "isempty(S)" conditions, in which case the "set_like_normal" but be toggled to true.
+                  else
+                     % we are trying to add a substruct rather than a
+                     % field, thus we must loop over all fields and add
+                     % them manually.
+                     [~,data_class] = types(C.data);
+                     loop_fields_and_add(value);
+                     set_like_normal = false; % since we already set all fields, we can (must) turn off "set_like_normal".
+                  end
                else % The field does already exist, and we need to handle the change correctly:
                   
                   % Note that S is now the "current value". We rename for
@@ -196,12 +206,13 @@ classdef structor2 < handle
                   if index_composition(end).type == "."
                      % The entire field is begin re-set:
 
-                     if ~all(new_size == current_size)
+                     if all(new_size == current_size)
                         % The field already exists, and the new dimensions are the same as previously, so we simply update the data:
                         C.data(current_value) = value;
                      else % The dimensions are different, so we delete the previous data and re-initialize.
                         C.data(current_value) = []; % delete old data
                         value = C.initialize_str_field(value); % re-initialize like a normal set operation for fields that don't exist.
+                        set_like_normal = true; % field has been re-initialized with new data and corresponding keys, and "str" msut be given these new keys, thus we set like normal.
                      end
 
                   elseif index_composition(end).type == "{}"
@@ -243,10 +254,32 @@ classdef structor2 < handle
 
          if set_like_normal
             % Continue making the property changes with MATLAB's normal functionality:
-            C = builtin('subsasgn', C, index_composition, value);
+            Function_Set_Like_Normal(value);
          end
 
-      end
+         %%% ----------------------------------------------------------------------------------
+         %%% Nested Functions:
+
+         function Function_Set_Like_Normal(key)
+            C = builtin('subsasgn', C, index_composition, key);
+         end
+
+         function loop_fields_and_add(S)
+            for name = string(fieldnames(S))'
+               if isstruct(S.(name))
+                  loop_fields_and_add(S.(name));
+               else
+                  if isa(S.(name),data_class)
+                     key = C.initialize_str_field(S.(name));
+                     Function_Set_Like_Normal(key);
+                  else
+                     error("USER ERROR: You are trying to append a substruct that contains an incorrect datatype. We require: '" + string(data_class) + "', but field: '" + string(name) + "', contains type: '" + string(class(S.(name))) + "'.")
+                  end
+               end
+            end
+         end
+
+      end % END OF SUBSASGN
 
 
       function set.flag_must_identify_nodes(C,in)
@@ -265,9 +298,19 @@ classdef structor2 < handle
       end
 
 
-
-
-
+      %%% Default structure settigns:
+      function set.default_mix(C,in)
+         C.flag_must_build_structure = true;
+         C.default_mix = in;
+      end
+      function set.default_structure(C,in)
+         C.flag_must_build_structure = true;
+         C.default_structure= in;
+      end
+      function set.default_depth(C,in)
+         C.flag_must_build_structure = true;
+         C.default_depth= in;
+      end
 
 
 
@@ -291,19 +334,78 @@ classdef structor2 < handle
 
 
          %%%%%%%%%%%%%% Custom indexing for creating subcopies:
-         if index_composition(1).subs == "str" && length(index_composition) > 1 && all(cellfun(@(type) string(type),{index_composition(1:end-1).type}) == ".") && index_composition(end).type == "()" && isempty(index_composition(end).subs)
-            new_str = builtin('subsref', C.str, index_composition(2:end-1));
-            if isstruct(new_str)
-               value = C.preCopy;
-               subcopy_keys = C.struct_to_vec(new_str,[]);
-               value.set_data(subcopy_keys,C.data(subcopy_keys))
-               value.str = new_str;
+         % (We only have custom indexing for substructs of "str")
+         if (index_composition(1).subs == "str" && length(index_composition) > 1) % Ensures that we are indexing into the "str"
+         
+            
+ 
+            if all(cellfun(@(type) string(type),{index_composition(1:end-1).type}) == ".") && index_composition(end).type   == "()" && isempty(index_composition(end).subs)
+               %%%%%%% ============================== Custom indexing alternative 1: ==============================
+               % Syntax:    "C.str.substr()"  /  empty parantheses
+               % Creates a subcopy. That is, a new structor whose "str" is the "substr"-substruct of the original structor.
+               new_str = builtin('subsref', C.str, index_composition(2:end-1));   
+               if isstruct(new_str) % only valid syntax if the value is a struct (since this is the struct that is being copied into a new structor's "str")
+                  subcopy_keys = C.struct_to_vec(new_str,[]);
+                  value = C.preCopy;
+                  value.set_data(subcopy_keys,C.data(subcopy_keys))
+                  value.str = new_str;
+                  return;
+               end
+
+
+
+            elseif all(cellfun(@(type) string(type),{index_composition([1:end-2 end]).type}) == ".") && index_composition(end-1).type == "()" && isempty(index_composition(end-1).subs) && ischar(index_composition(end).subs)
+               %%%%%%% ============================== Custom indexing alternative 2: ==============================
+               % Syntax:    "C.str.substr().vec"  /  empty parantheses, followed by ".vec"
+               % Creates a subvector. That is, the "vec" of the the subcopy
+               % "C.str.substr()", but skips the generation of the subcopy.
+               % Equivalent syntax:
+               %     - "subcopy = C.str.substr();"
+               %     - "subvec = subcopy.vec;"
+               % but this generates the subcopy as an intermediate step.
+
+
+               new_str = builtin('subsref', C.str, index_composition(2:end-2));
+               if isstruct(new_str)
+                  subcopy_keys = C.struct_to_vec(new_str,[]);
+
+                  
+
+               elseif isa(new_str,types(C.data)) % redundant condition, since a value gotten from 'str' should always be the correct key-type. But here for bug-control.
+                  % If we enter here, we expect "new_str" to already
+                  % to a list of keys.
+                  % We simply re-name for clarity:
+                  subcopy_keys = new_str;
+               else
+                  error("DEV ERROR: Should not enter here... Field of 'str' is not struct nor 'double' (key-type).")
+               end
+
+               switch string(index_composition(end).subs)
+                  case "vec" % returns the vector of substr
+                     C.build_structure
+
+                     % We ensure that the elements appears in the same
+                     % order as in the current structure / mix of the structor:
+                     [~, idx] = ismember(subcopy_keys, C.map); % Find the indices of keys in map
+                     [~, sortOrder] = sort(idx); % Sort keys based on their position in map
+
+                     value = C.data(subcopy_keys(sortOrder));
+                  case "len" % returns the length of the subvector
+                     value = length(subcopy_keys);
+                  case "remove"
+                     C.data(subcopy_keys) = []; % remove data from structor
+                     var_reference = 'C';
+                     for i = 1:length(index_composition)-3 % reducing by 3 because 2 of then are the special syntax, and the third is the field we are trying to remove (which is entered separately).
+                        var_reference = [var_reference index_composition(i).type index_composition(i).subs];
+                     end
+                     eval([var_reference, ' = rmfield(',var_reference,',',char("'"),index_composition(end-2).subs,char("'"),');']); % remove the field using the builtin MATLAB "rmfield" funciton.
+                  otherwise
+                     error("USER ERROR: You are indexing into a substruct using 'empty parantheses', which is a special indexing syntax for structors, but you are using it wrongly. See structor.help for more.")
+               end
                return;
             end
 
          end
-
-
 
 
 
@@ -324,7 +426,7 @@ classdef structor2 < handle
                case "str"
                   if ~isstruct(value)
                      % Override output, and return the correct data:
-                     value = C.data(value);
+                     value = C.get_data(value); 
                   else
                      % to get all the correct values, we need to do a loop,
                      % similar to when we traverse the struct to identify
@@ -338,10 +440,6 @@ classdef structor2 < handle
 
          % end
 
-
-
-
-
       end
 
 
@@ -351,10 +449,6 @@ classdef structor2 < handle
          end
          out = C.data(C.map);
       end
-
-      
-
-
 
       function out = get.len(C)
          if C.flag_must_build_structure
@@ -378,6 +472,11 @@ classdef structor2 < handle
             structure (1,1) string {mustBeMember(structure,["first-fields-first","shallow-values-first","bredth-to-first"])} = C.default_structure;
             mix (1,1) string {mustBeMember(mix,["column","row","scalar","bulk"])} = C.default_mix;
             depth (1,1) double {mustBeInteger,mustBeNonnegative} = C.default_depth;
+         end
+
+         % Don't bother if not necessary....
+         if ~C.flag_must_build_structure
+            return
          end
          % This function takes reoranizes "map" so as to extract the data
          % in the correct order
@@ -508,8 +607,30 @@ classdef structor2 < handle
             if isstruct(S.(name))
                S.(name) = C.convert_to_data_struct(S.(name));
             else
-               S.(name) = C.data(S.(name));
+               if isa(S.(name),"double")
+                  if  ~isempty(S.(name))
+                     % if the value is a double, the it is a key to the data
+                     % dictionary, thus we retrieve the data.
+                     S.(name) = C.get_data(S.(name));
+                  end
+               else
+                  error("ERROR: Trying to retrieve data with key that is not a 'double'.")
+               end
             end
+         end
+      end
+
+      function key = get_data(C,key)
+         if isa(key,"double")
+            if  ~isempty(key)
+               % if the value is a double, the it is a key to the data
+               % dictionary, thus we retrieve the data.
+               key = C.data(key);
+            else
+               % else we simply return the key, which is an empty double (this is a sneaky way to store empty doubles, without storing them in the dictionary...)
+            end
+         else
+            error("ERROR: Trying to retrieve data with key that is not a 'double'.")
          end
       end
 
@@ -519,10 +640,12 @@ classdef structor2 < handle
          C.flag_must_build_structure = true;
          C.flag_must_identify_nodes = true;
 
-         inds = reshape(1:numel(value),size(value));
-         C.data(C.data_length + inds) = value;
-         value = C.data_length + inds;
-         C.data_length = value(end);
+         if ~isempty(value)
+            inds = reshape(1:numel(value),size(value));
+            C.data(C.data_length + inds) = value;
+            value = C.data_length + inds;
+            C.data_length = value(end);
+         end
       end
 
 
@@ -731,14 +854,13 @@ classdef structor2 < handle
       function help
          disp(' ')
          disp('====================== help: "structor" =======================')
-         disp(' - PROPERTIES:')
+         disp(' - PROPERTIES: ------------')
          disp('            "str" - a struct containing data in various fields/substructs.')
          disp('            "vec" - a vector containing all end-fields of "str" in a specific order, defined by "mix" and "structure".')
          disp('            "len" - the length of "vec".')
-         disp(' - METHODS:')
+         disp(' ')
+         disp(' - METHODS: ---------------')
          disp('       "copy" - creates a copy of the sturctor instance. This is handy since the class is a handle-class.')
-         disp('    *subcopy* - To create that only contains a substruct of the original struct-hierarchy, use the special syntax: "C_subcopy = C.str.substr1()" That is, use empty parantheses to create a copy containing only the substruct.')
-         disp('                 This enables you to generate a vector of your sturct, then modify the vector and retrieve the equivalent struct from that changed vector.')
          disp('      "zeros" - creates a copy of the sturctor instance with all values equal to 0.')
          disp('       "ones" - creates a copy of the sturctor instance with all values equal to 1.')
          disp('     "interp" - creates a new structor where all fields are interpolated based on an "original" sample vector and a "new" sample vector.')
@@ -747,6 +869,14 @@ classdef structor2 < handle
          disp('                 The output stuct-fields then have the same number of columns as the "new" sample vector.')
          disp('                  (if any struct-field has fewer columns than elements of the original sample vector, then the columns are mapped to the first elements of the sample vector, and the rest are ignored.)')
          disp('   "retrieve" - OBSOLETE. creates a new structor with the same fields as the current structor, where the struct-fields are based on the vector you provide.')
+         disp(' ')
+         disp(' - SPECIAL SYNTAX: --------')
+         disp('    *subcopy* - "C_subcopy = C.str.substr()"  /  empty parantheses')
+         disp('                Returns a structor that only contains a substruct "substr". That is, use empty parantheses to create a copy containing only the substruct.')
+         disp('     *subvec* - "subvec = C.str.substr().vec"  /  empty parantheses followed by ".vec"')
+         disp('                Returns a vector equivalent to the "vec" of substruct "substr", but avoids generating a subcopy.')
+         disp(' *len subvec* - "subvec_len = C.str.substr().len"  /  empty parantheses followed by ".len"')
+         disp('                Returns the length of a subvec, without generating a subvec nor subcopy.')
          disp('===============================================================')
          disp(' ')
       end
