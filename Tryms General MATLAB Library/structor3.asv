@@ -53,6 +53,7 @@ from the structor. Still with a pointer like behavior.
    % Struct/Vector -- These are the user interfaces into the structor data.
    properties
       str (1,1) struct = struct
+      ind (1,1) struct = struct
    end
    properties(Dependent)
       vec (:,1) % returns a vector of the structor-data, organized according to the "pattern" and "mix" settigs
@@ -346,6 +347,15 @@ from the structor. Still with a pointer like behavior.
          out = size(C.map,1);
       end
 
+
+      function ind = get.ind(C)
+         if C.flag_must_build_structure
+            C.build_structure
+            C_copy = C.copy;
+            C_copy.vec = 1:C.len;
+         end
+         C.ind = C_copy.str;
+      end
 
 
    end
@@ -700,16 +710,19 @@ get back to it later.
 % utility methods:
    methods
       function C_copy = copy(C)
-         C_copy = C.subsref(make_ind_comp_for_str_special_syntax("copy"));
+         C_copy = C.subsref(structor3.make_ind_comp_for_str_special_syntax("copy"));
       end
       function C_zeros = zeros(C)
-         C_zeros = C.subsref(make_ind_comp_for_str_special_syntax("zeros"));
+         C_zeros = C.subsref(structor3.make_ind_comp_for_str_special_syntax("zeros"));
       end
       function C_ones = ones(C)
-         C_ones = C.str().ones;
+         C_ones = C.subsref(structor3.make_ind_comp_for_str_special_syntax("ones"));
       end
       function C_nan = nan(C)
-         C_nan = C.str().nan;
+         C_nan = C.subsref(structor3.make_ind_comp_for_str_special_syntax("nan"));
+      end
+      function C_empty_copy = empty(C)
+         C_empty_copy = structor3(C.default_mix,C.default_structure,C.default_depth);
       end
 
       % Interpolation funciton:
@@ -774,9 +787,9 @@ for the new series.
          ind_comp(1).type = ".";
          ind_comp(1).subs = "str";
          ind_comp(2).type = "()";
-         ind_comp(2).subs = {[]};
+         ind_comp(2).subs = {};
          ind_comp(3).type = ".";
-         ind_comp(3).subs = syntax;
+         ind_comp(3).subs = char(syntax);
       end
    end
 
@@ -784,3 +797,211 @@ for the new series.
 
 end
 
+
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%% Tester script for structor version 3
+
+%%%%%%%%%% Some code to test the structor functionality...
+
+% fresh
+% 
+% disp('===============================')
+% disp('--- Instantiating structor3 ---')
+% C = structor3("bulk","first-fields-first");
+% 
+% C.str.a1.a2 = ["aa11","aa12"; "aa21","aa22"];
+% C.str.a1.b2 = "ab";
+% C.str.b1 = "b";
+% C.str.c1.a2.a3 = "caa";
+% C.str.c1.a2.b3 = "cab";
+% C.str.c1.b2 = "cb";
+% C.str.a1.c2 = "ac";
+% C.str.c1.a2.c3.a4 = ["caca11", "caca12"];
+% C.str.c1.a2.c3.b4 = ["cacb11"; "cacb21"];
+% 
+% disp("====== str:")
+% C.str
+% 
+% 
+% C.build_structure("first-fields-first","bulk",1);
+% C.vec
+% 
+% 
+% %% Testing structures
+% disp('===========================')
+% disp('--- Building structures ---')
+% 
+% C.build_structure("shallow-values-first","bulk")
+% disp("shallow-values-first / bulk")
+% C.vec
+% 
+% C.build_structure("shallow-values-first","row")
+% disp("shallow-values-first / row")
+% C.vec
+% 
+% C.build_structure("shallow-values-first","column")
+% disp("shallow-values-first / column")
+% C.vec
+% 
+% C.build_structure("shallow-values-first","scalar")
+% disp("shallow-values-first / scalar")
+% C.vec
+% 
+% C.build_structure("bredth-to-first","bulk",0);
+% disp("bredth-to-first / bulk / depth 0")
+% C.vec
+% 
+% C.build_structure("bredth-to-first","bulk",2);
+% disp("bredth-to-first / bulk / depth 2")
+% C.vec
+% 
+% C.build_structure("bredth-to-first","bulk",1);
+% disp("bredth-to-first / bulk / depth 1")
+% C.vec
+% 
+% 
+% %% Getting Vec
+% 
+% disp('===================')
+% disp('--- Getting vec ---')
+% C.vec
+% 
+% C.vec(1)
+% 
+% C.vec(2:6)
+% 
+% C.vec([1 3 5])
+% 
+% C.vec(:)
+% 
+% C.vec{1}
+% 
+% %% Getting str
+% disp('===================')
+% disp('--- Getting str ---')
+% 
+% C.str
+% 
+% C.str.a1
+% 
+% C.str.a1.a2
+% 
+% C.str.a1.a2(1,1)
+% 
+% %% special syntax:
+% disp('======================')
+% disp('--- Special syntax ---')
+% 
+% disp('copy:')
+% S = C.str.a1().copy;
+% S.str
+% S.vec
+% 
+% disp('Zeros:')
+% Z = C.str.a1().zeros;
+% Z.str
+% Z.vec
+% 
+% disp('ones:')
+% O = C.str.a1().ones;
+% O.str
+% O.vec
+% 
+% disp('nan:')
+% N = C.str.a1().nan;
+% N.str
+% N.vec
+% 
+% disp('Typing: C.str.c1.a2().vec')
+% v = C.str.c1.a2().vec;
+% disp(v)
+% 
+% 
+% %% Setting str
+% 
+% disp('===================')
+% disp('--- Setting str ---')
+% 
+% C.str.ne.b2.nonexistant = "New value!!";
+% C.str.a1.a2(1,2) = "indexed value !";
+% C.vec
+% C.str.a1.a2(:) = "setting the whole thing at once via indexing!";
+% C.vec
+% 
+% C.str.a1.a2 = "overriding the field /!\";
+% C.vec
+% 
+% %% Setting vec
+% disp('===================')
+% disp('--- Setting vec ---')
+% 
+% disp('Typing: C.vec(1) = "(1)";')
+% C.vec(1) = "(1)";
+% C.vec
+% 
+% disp('Typing: C.vec(2:6) = "2:6";')
+% C.vec(2:6) = "2:6";
+% C.vec
+% 
+% disp('Typing: C.vec([1 3 5]) = "[1 3 5]";')
+% C.vec([1 3 5]) = "[1 3 5]";
+% C.vec
+% 
+% disp('Typing: C.vec = "setting all elements to this...";')
+% C.vec = "setting all elements to this...";
+% C.vec
+% 
+% disp('Typing: C.vec(:) = "setting all elements to this via indexing...";')
+% C.vec(:) = "setting all elements to this via indexing...";
+% C.vec
+% 
+% 
+% %% Practical methods:
+% disp('======================')
+% disp('--- Practical methods (goes via special syntax) ---')
+% 
+% disp('copy:')
+% S = C.copy;
+% S.str
+% S.vec
+% 
+% disp('zeros:')
+% Z = C.zeros;
+% Z.str
+% Z.vec
+% 
+% disp('ones:')
+% O = C.ones;
+% O.str
+% O.vec
+% 
+% disp('nan:')
+% N = C.nan;
+% N.str
+% N.vec
+% 
+% 
+% 
+% %% Interpolation:
+% disp('=====================')
+% disp('--- Interpolating ---')
+% 
+% C = structor3("column");
+% C.str.X = [ 1  2  3  4;
+%            10 20 30 40];
+% C.str.U = [200 400 600 800];
+% 
+% disp('Non-interpolated:')
+% C.str
+% C.vec
+% 
+% C_interp = C.interp(1:4,(1:4)+0.5);
+% 
+% disp('interpolated:')
+% C_interp.str
+% C_interp.vec
