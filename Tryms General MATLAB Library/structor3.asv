@@ -700,16 +700,16 @@ get back to it later.
 % utility methods:
    methods
       function C_copy = copy(C)
-         C_copy = C.subsref(structor3.make_ind_comp_for_str_special_syntax("copy"));
+         C_copy = C.subsref(make_ind_comp_for_str_special_syntax("copy"));
       end
       function C_zeros = zeros(C)
-         C_zeros = C.subsref(structor3.make_ind_comp_for_str_special_syntax("zeros"));
+         C_zeros = C.subsref(make_ind_comp_for_str_special_syntax("zeros"));
       end
       function C_ones = ones(C)
-         C_ones = C.subsref(structor3.make_ind_comp_for_str_special_syntax("ones"));
+         C_ones = C.str().ones;
       end
       function C_nan = nan(C)
-         C_nan = C.subsref(structor3.make_ind_comp_for_str_special_syntax("nan"));
+         C_nan = C.str().nan;
       end
 
       % Interpolation funciton:
@@ -774,9 +774,9 @@ for the new series.
          ind_comp(1).type = ".";
          ind_comp(1).subs = "str";
          ind_comp(2).type = "()";
-         ind_comp(2).subs = {};
+         ind_comp(2).subs = {[]};
          ind_comp(3).type = ".";
-         ind_comp(3).subs = char(syntax);
+         ind_comp(3).subs = syntax;
       end
    end
 

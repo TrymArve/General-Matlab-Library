@@ -195,5 +195,5 @@ C.vec
 C_interp = C.interp(1:4,(1:4)+0.5);
 
 disp('interpolated:')
-C_interp.str
+C.str
 C_interp.vec
