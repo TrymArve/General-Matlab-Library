@@ -1,0 +1,246 @@
+classdef structor4 < handle
+   % STRUCTOR4 - Struct/Vector linked interface
+   % This class allows data to be accessed/modified either as a nested struct
+   % via .str or as a vector via .vec, with instant synchronization.
+   %
+   % structure  - traversal order: 'first-fields-first', 'shallow-fields-first', 'bredth-to-first'
+   % mix        - node extraction: 'bulk', 'row', 'column', 'scalar'
+   % default_depth - depth for 'bredth-to-first' splitting
+
+   properties
+      structure (1,1) string = "first-fields-first"
+      mix (1,1) string = "bulk"  % bulk, row, column, scalar
+      default_depth (1,1) double = 1
+   end
+
+   properties (Access = private)
+      masterStore cell = {}      % cell array of all leaf data arrays
+      pathList cell = {}         % cell array of leaf paths (dot-separated strings)
+      mappingCache struct = struct('vec2store',[],'store2vec',[])
+      cacheValid logical = false
+   end
+
+   properties (Dependent)
+      str  % struct-like view
+      vec  % vector-like view
+   end
+
+   methods
+      function obj = structor4(initialStruct)
+         if nargin > 0
+            obj.setFromStruct(initialStruct);
+         end
+      end
+
+      function s = get.str(obj)
+         s = structor4.StructProxy(obj, "");
+      end
+
+      function v = get.vec(obj)
+         if ~obj.cacheValid
+            obj.buildMapping();
+         end
+         v = structor4.VectorProxy(obj);
+      end
+
+      function setFromStruct(obj, S)
+         % Overwrite everything from a MATLAB struct
+         if ~isstruct(S)
+            error('Input must be a struct');
+         end
+         obj.masterStore = {};
+         obj.pathList = {};
+         obj.cacheValid = false;
+         obj.addStructRecursive(S, "");
+      end
+
+      function S = exportStruct(obj)
+         % Return as real MATLAB struct (copy)
+         S = obj.rebuildStruct();
+      end
+   end
+
+   methods (Access = private)
+      function addStructRecursive(obj, S, basePath)
+         % Add struct leaves to masterStore
+         fn = fieldnames(S);
+         for i = 1:numel(fn)
+            val = S.(fn{i});
+            path = fn{i};
+            if basePath ~= ""
+               path = basePath + "." + path;
+            end
+            if isstruct(val)
+               obj.addStructRecursive(val, path);
+            else
+               obj.masterStore{end+1} = val;
+               obj.pathList{end+1} = path;
+            end
+         end
+      end
+
+      function S = rebuildStruct(obj)
+         % Rebuild full struct from masterStore
+         S = struct();
+         for i = 1:numel(obj.masterStore)
+            parts = split(obj.pathList{i}, '.');
+            tmp = S;
+            ref = tmp;
+            refStr = "S";
+            for p = 1:numel(parts)-1
+               if ~isfield(eval(refStr), parts{p})
+                  eval([refStr "." parts{p} " = struct();"]);
+               end
+               refStr = refStr + "." + parts{p};
+            end
+            eval([refStr "." parts{end} " = obj.masterStore{i};"]);
+         end
+      end
+
+      function buildMapping(obj)
+         % Build vec <-> store mapping according to structure and mix
+         paths = obj.pathList;
+         orderIdx = obj.traverseOrder(paths);
+         vec2store = {};
+         store2vec = cell(1, numel(paths));
+
+         switch obj.mix
+            case "bulk"
+               for k = 1:numel(orderIdx)
+                  arr = obj.masterStore{orderIdx(k)};
+                  idxList = num2cell(1:numel(arr));
+                  for j = 1:numel(idxList)
+                     vec2store{end+1} = {orderIdx(k), idxList{j}};
+                  end
+               end
+            case {"row","column","scalar"}
+               maxPasses = obj.maxPassesForMix(orderIdx);
+               for pass = 1:maxPasses
+                  for k = 1:numel(orderIdx)
+                     arr = obj.masterStore{orderIdx(k)};
+                     sz = size(arr);
+                     if isempty(arr)
+                        continue;
+                     end
+                     switch obj.mix
+                        case "row"
+                           if pass <= sz(1)
+                              sel = arr(pass,:);
+                           else
+                              continue;
+                           end
+                        case "column"
+                           if pass <= sz(2)
+                              sel = arr(:,pass);
+                           else
+                              continue;
+                           end
+                        case "scalar"
+                           if pass == 1
+                              sel = arr(1);
+                           else
+                              continue;
+                           end
+                     end
+                     sel = sel(:);
+                     for j = 1:numel(sel)
+                        vec2store{end+1} = {orderIdx(k), pass, j};
+                     end
+                  end
+               end
+            otherwise
+               error('Unknown mix option');
+         end
+
+         obj.mappingCache.vec2store = vec2store;
+         obj.cacheValid = true;
+      end
+
+      function orderIdx = traverseOrder(obj, paths)
+         % Determine traversal order of leaves
+         switch obj.structure
+            case "first-fields-first"
+               orderIdx = 1:numel(paths);
+            case "shallow-fields-first"
+               depths = cellfun(@(p) numel(split(p,'.')), paths);
+               [~, orderIdx] = sort(depths, 'ascend');
+            case "bredth-to-first"
+               % Split into groups at default_depth
+               groups = containers.Map('KeyType','char','ValueType','any');
+               for i = 1:numel(paths)
+                  parts = split(paths{i},'.');
+                  keyDepth = min(numel(parts), obj.default_depth);
+                  key = strjoin(parts(1:keyDepth), '.');
+                  if ~isKey(groups, key)
+                     groups(key) = [];
+                  end
+                  groups(key) = [groups(key), i];
+               end
+               keys = groups.keys;
+               orderIdx = [];
+               idxPos = ones(size(keys));
+               done = false;
+               while ~done
+                  done = true;
+                  for g = 1:numel(keys)
+                     if idxPos(g) <= numel(groups(keys{g}))
+                        orderIdx(end+1) = groups(keys{g})(idxPos(g));
+                        idxPos(g) = idxPos(g) + 1;
+                        done = false;
+                     end
+                  end
+               end
+            otherwise
+               error('Unknown structure option');
+         end
+      end
+
+      function maxPass = maxPassesForMix(obj, orderIdx)
+         maxPass = 0;
+         for k = orderIdx
+            sz = size(obj.masterStore{k});
+            switch obj.mix
+               case "row"
+                  maxPass = max(maxPass, sz(1));
+               case "column"
+                  maxPass = max(maxPass, sz(2));
+               case "scalar"
+                  maxPass = 1;
+            end
+         end
+      end
+   end
+
+   %================== Nested Proxy Classes ==================%
+   methods (Static)
+      function proxy = StructProxy(parent, basePath)
+         proxy = structor4.StructProxyClass(parent, basePath);
+      end
+
+      function proxy = VectorProxy(parent)
+         proxy = structor4.VectorProxyClass(parent);
+      end
+   end
+
+   methods (Static, Access=private)
+      % Nested StructProxy
+      function obj = StructProxyClass(parent, basePath)
+         obj = struct();
+         obj.parent = parent;
+         obj.path = basePath;
+         obj = class(obj, 'structor4.StructProxy');
+      end
+
+      % Nested VectorProxy
+      function obj = VectorProxyClass(parent)
+         obj = struct();
+         obj.parent = parent;
+         obj = class(obj, 'structor4.VectorProxy');
+      end
+   end
+
+
+
+
+end
+

@@ -351,8 +351,10 @@ from the structor. Still with a pointer like behavior.
       function ind = get.ind(C)
          if C.flag_must_build_structure
             C.build_structure
+         end
+         if isempty(fieldnames(C.ind))
             C_copy = C.copy;
-            C_copy.vec = 1:C.len;
+            C_copy.set_vec(1:C.len);
             C.ind = C_copy.str;
          end
          ind = C.ind;
